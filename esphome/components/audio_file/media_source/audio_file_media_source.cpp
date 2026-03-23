@@ -17,6 +17,10 @@ struct AudioSinkAdapter : public audio::AudioSinkCallback {
     return this->source->write_output(data, length, pdTICKS_TO_MS(ticks_to_wait), this->stream_info);
   }
 };
+
+bool supports_pcm_bit_depth(uint8_t bits_per_sample) {
+  return (bits_per_sample >= 8) && (bits_per_sample <= 32) && ((bits_per_sample % 8) == 0);
+}
 }  // namespace
 
 #if defined(USE_AUDIO_OPUS_SUPPORT)
@@ -252,8 +256,10 @@ void AudioFileMediaSource::decode_task(void *params) {
         ESP_LOGD(TAG, "Bits per sample: %d, Channels: %d, Sample rate: %d", stream_info.get_bits_per_sample(),
                  stream_info.get_channels(), stream_info.get_sample_rate());
 
-        if (stream_info.get_bits_per_sample() != 16 || stream_info.get_channels() > 2) {
-          ESP_LOGE(TAG, "Incompatible audio stream. Only 16 bits per sample and 1 or 2 channels are supported");
+        if (!supports_pcm_bit_depth(stream_info.get_bits_per_sample()) || stream_info.get_channels() > 2) {
+          ESP_LOGE(TAG,
+                   "Incompatible audio stream. Only byte-aligned 8/16/24/32-bit PCM with 1 or 2 channels is "
+                   "supported");
           xEventGroupSetBits(this_source->event_group_, EventGroupBits::TASK_ERROR);
           break;
         }

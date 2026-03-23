@@ -24,6 +24,10 @@ static const uint32_t INFO_ERROR_QUEUE_COUNT = 5;
 
 static const char *const TAG = "speaker_media_player.pipeline";
 
+static bool supports_pcm_bit_depth(uint8_t bits_per_sample) {
+  return (bits_per_sample >= 8) && (bits_per_sample <= 32) && ((bits_per_sample % 8) == 0);
+}
+
 enum EventGroupBits : uint32_t {
   // MESSAGE_* bits are only set by their respective tasks
 
@@ -137,7 +141,7 @@ AudioPipelineState AudioPipeline::process_state() {
                 ESP_LOGE(TAG, "Failed to parse the file's header.");
                 break;
               case DecodingError::INCOMPATIBLE_BITS_PER_SAMPLE:
-                ESP_LOGE(TAG, "Incompatible bits per sample. Only 16 bits per sample is supported");
+                ESP_LOGE(TAG, "Incompatible bits per sample. Only byte-aligned 8/16/24/32-bit PCM is supported");
                 break;
               case DecodingError::INCOMPATIBLE_CHANNELS:
                 ESP_LOGE(TAG, "Incompatible number of channels. Only 1 or 2 channel audio is supported.");
@@ -460,7 +464,7 @@ void AudioPipeline::decode_task(void *params) {
           // Send the stream information to the pipeline
           event.audio_stream_info = this_pipeline->current_audio_stream_info_;
 
-          if (this_pipeline->current_audio_stream_info_.get_bits_per_sample() != 16) {
+          if (!supports_pcm_bit_depth(this_pipeline->current_audio_stream_info_.get_bits_per_sample())) {
             // Error state, incompatible bits per sample
             event.decoding_err = DecodingError::INCOMPATIBLE_BITS_PER_SAMPLE;
             xEventGroupSetBits(this_pipeline->event_group_,

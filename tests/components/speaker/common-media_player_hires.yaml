@@ -1,0 +1,10 @@
+<<: !include common-hires.yaml
+
+wifi:
+  ap:
+
+media_player:
+  - platform: speaker
+    id: speaker_media_player_id
+    announcement_pipeline:
+      speaker: speaker_id

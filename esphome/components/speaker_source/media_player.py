@@ -10,6 +10,7 @@ from esphome.components.const import (
 import esphome.config_validation as cv
 from esphome.const import (
     CONF_DELAY,
+    CONF_BITS_PER_SAMPLE,
     CONF_FORMAT,
     CONF_ID,
     CONF_NUM_CHANNELS,
@@ -89,13 +90,14 @@ def _get_supported_format_struct(pipeline: ConfigType, purpose: MockObj):
     # Omit sample_bytes for MP3: ffmpeg transcoding in Home Assistant fails
     # if the number of bytes per sample is specified for MP3.
     if pipeline[CONF_FORMAT] != "MP3":
-        args.append(("sample_bytes", 2))
+        args.append(("sample_bytes", (pipeline[CONF_BITS_PER_SAMPLE] + 7) // 8))
 
     return cg.StructInitializer(*args)
 
 
 def _validate_pipeline(config: ConfigType) -> ConfigType:
     # Inherit settings from speaker if not manually set
+    inherit_property_from(CONF_BITS_PER_SAMPLE, CONF_SPEAKER)(config)
     inherit_property_from(CONF_NUM_CHANNELS, CONF_SPEAKER)(config)
     inherit_property_from(CONF_SAMPLE_RATE, CONF_SPEAKER)(config)
 
@@ -106,7 +108,7 @@ def _validate_pipeline(config: ConfigType) -> ConfigType:
     audio.final_validate_audio_schema(
         "speaker_source media_player",
         audio_device=CONF_SPEAKER,
-        bits_per_sample=16,
+        bits_per_sample=config.get(CONF_BITS_PER_SAMPLE),
         channels=config.get(CONF_NUM_CHANNELS),
         sample_rate=config.get(CONF_SAMPLE_RATE),
     )(config)

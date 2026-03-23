@@ -1,0 +1,34 @@
+i2s_audio:
+  i2s_lrclk_pin: ${i2s_bclk_pin}
+  i2s_bclk_pin: ${i2s_lrclk_pin}
+  i2s_mclk_pin: ${i2s_mclk_pin}
+
+speaker:
+  - platform: i2s_audio
+    id: speaker_id
+    dac_type: external
+    i2s_dout_pin: ${i2s_dout_pin}
+    channel: stereo
+    bits_per_sample: 24bit
+    sample_rate: 96000
+    mclk_multiple: 384
+
+audio_file:
+  - id: test_audio
+    file:
+      type: local
+      path: $component_dir/test.wav
+
+media_source:
+  - platform: audio_file
+    id: media_audio_file_source
+
+media_player:
+  - platform: speaker_source
+    id: media_player_id
+    name: Media Player
+    media_pipeline:
+      speaker: speaker_id
+      format: WAV
+      sources:
+        - media_audio_file_source
