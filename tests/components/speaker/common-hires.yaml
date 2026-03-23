@@ -58,6 +58,7 @@ speaker:
     id: speaker_id
     dac_type: external
     i2s_dout_pin: ${i2s_dout_pin}
+    hires_audio: true
     channel: stereo
     bits_per_sample: 24bit
     sample_rate: 96000

@@ -101,6 +101,7 @@ class I2SAudioSpeaker : public I2SAudioOut, public speaker::Speaker, public Comp
   EventGroupHandle_t event_group_{nullptr};
 
   QueueHandle_t i2s_event_queue_{nullptr};
+  size_t i2s_event_queue_count_{0};
 
   std::weak_ptr<RingBuffer> audio_ring_buffer_;
 
@@ -113,6 +114,7 @@ class I2SAudioSpeaker : public I2SAudioOut, public speaker::Speaker, public Comp
   int16_t q15_volume_factor_{INT16_MAX};
 
   audio::AudioStreamInfo current_stream_info_;  // The currently loaded driver's stream info
+  I2SAudioDmaConfig dma_config_{};
 
   gpio_num_t dout_pin_;
   std::string i2s_comm_fmt_;

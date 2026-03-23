@@ -16,13 +16,11 @@
 namespace esphome {
 namespace i2s_audio {
 
-static const uint32_t DMA_BUFFER_DURATION_MS = 15;
-static const size_t DMA_BUFFERS_COUNT = 4;
+static const size_t LEGACY_DMA_BUFFERS_COUNT = I2S_LEGACY_DMA_BUFFERS_COUNT;
+static const size_t LEGACY_I2S_EVENT_QUEUE_COUNT = LEGACY_DMA_BUFFERS_COUNT + 1;
 
 static const size_t TASK_STACK_SIZE = 4096;
 static const ssize_t TASK_PRIORITY = 19;
-
-static const size_t I2S_EVENT_QUEUE_COUNT = DMA_BUFFERS_COUNT + 1;
 
 static const char *const TAG = "i2s_audio.speaker";
 
@@ -76,6 +74,11 @@ void I2SAudioSpeaker::dump_config() {
     ESP_LOGCONFIG(TAG, "  Timeout: %" PRIu32 " ms", this->timeout_.value());
   }
   ESP_LOGCONFIG(TAG, "  Communication format: %s", this->i2s_comm_fmt_.c_str());
+  if (this->hires_audio_) {
+    ESP_LOGCONFIG(TAG, "  Hi-res audio: YES");
+    ESP_LOGCONFIG(TAG, "  MCLK multiple: %" PRIu32, static_cast<uint32_t>(this->mclk_multiple_));
+    ESP_LOGCONFIG(TAG, "  APLL: %s", YESNO(this->use_apll_));
+  }
 }
 
 void I2SAudioSpeaker::loop() {
@@ -236,15 +239,15 @@ void I2SAudioSpeaker::speaker_task(void *params) {
 
   xEventGroupSetBits(this_speaker->event_group_, SpeakerEventGroupBits::TASK_STARTING);
 
-  const uint32_t dma_buffers_duration_ms = DMA_BUFFER_DURATION_MS * DMA_BUFFERS_COUNT;
+  const uint32_t dma_buffer_duration_ms = this_speaker->dma_config_.dma_buffer_duration_ms;
+  const uint32_t dma_buffers_duration_ms = this_speaker->dma_config_.dma_buffers_duration_ms;
   // Ensure ring buffer duration is at least the duration of all DMA buffers
   const uint32_t ring_buffer_duration = std::max(dma_buffers_duration_ms, this_speaker->buffer_duration_ms_);
 
   // The DMA buffers may have more bits per sample, so calculate buffer sizes based in the input audio stream info
   const size_t ring_buffer_size = this_speaker->current_stream_info_.ms_to_bytes(ring_buffer_duration);
 
-  const uint32_t frames_to_fill_single_dma_buffer =
-      this_speaker->current_stream_info_.ms_to_frames(DMA_BUFFER_DURATION_MS);
+  const uint32_t frames_to_fill_single_dma_buffer = this_speaker->dma_config_.dma_frame_num;
   const size_t bytes_to_fill_single_dma_buffer =
       this_speaker->current_stream_info_.frames_to_bytes(frames_to_fill_single_dma_buffer);
 
@@ -311,7 +314,7 @@ void I2SAudioSpeaker::speaker_task(void *params) {
       if (this_speaker->pause_state_) {
         // Pause state is accessed atomically, so thread safe
         // Delay so the task yields, then skip transferring audio data
-        vTaskDelay(pdMS_TO_TICKS(DMA_BUFFER_DURATION_MS));
+        vTaskDelay(pdMS_TO_TICKS(dma_buffer_duration_ms));
         continue;
       }
 
@@ -370,7 +373,7 @@ void I2SAudioSpeaker::speaker_task(void *params) {
         if (stop_gracefully && tx_dma_underflow) {
           break;
         }
-        vTaskDelay(pdMS_TO_TICKS(DMA_BUFFER_DURATION_MS / 2));
+        vTaskDelay(pdMS_TO_TICKS(std::max<uint32_t>(1, dma_buffer_duration_ms / 2)));
       } else {
         size_t bytes_written = 0;
         if (tx_dma_underflow) {
@@ -387,7 +390,7 @@ void I2SAudioSpeaker::speaker_task(void *params) {
         } else {
           // Audio is already playing, use regular I2S write to add to the DMA buffers
           i2s_channel_write(this_speaker->tx_handle_, transfer_buffer->get_buffer_start(), transfer_buffer->available(),
-                            &bytes_written, DMA_BUFFER_DURATION_MS);
+                            &bytes_written, dma_buffer_duration_ms);
         }
         if (bytes_written > 0) {
           last_data_received_time = millis();
@@ -474,38 +477,6 @@ esp_err_t I2SAudioSpeaker::start_i2s_driver_(audio::AudioStreamInfo &audio_strea
     return ESP_ERR_INVALID_STATE;
   }
 
-  uint32_t dma_buffer_length = audio_stream_info.ms_to_frames(DMA_BUFFER_DURATION_MS);
-
-  i2s_chan_config_t chan_cfg = {
-      .id = this->parent_->get_port(),
-      .role = this->i2s_role_,
-      .dma_desc_num = DMA_BUFFERS_COUNT,
-      .dma_frame_num = dma_buffer_length,
-      .auto_clear = true,
-      .intr_priority = 3,
-  };
-  /* Allocate a new TX channel and get the handle of this channel */
-  esp_err_t err = i2s_new_channel(&chan_cfg, &this->tx_handle_, NULL);
-  if (err != ESP_OK) {
-    ESP_LOGE(TAG, "Failed to allocate new I2S channel");
-    this->parent_->unlock();
-    return err;
-  }
-
-  i2s_clock_src_t clk_src = I2S_CLK_SRC_DEFAULT;
-#ifdef I2S_CLK_SRC_APLL
-  if (this->use_apll_) {
-    clk_src = I2S_CLK_SRC_APLL;
-  }
-#endif
-  i2s_std_gpio_config_t pin_config = this->parent_->get_pin_config();
-
-  i2s_std_clk_config_t clk_cfg = {
-      .sample_rate_hz = audio_stream_info.get_sample_rate(),
-      .clk_src = clk_src,
-      .mclk_multiple = this->mclk_multiple_,
-  };
-
   i2s_slot_mode_t slot_mode = this->slot_mode_;
   i2s_std_slot_mask_t slot_mask = this->std_slot_mask_;
   if (audio_stream_info.get_channels() == 1) {
@@ -515,55 +486,140 @@ esp_err_t I2SAudioSpeaker::start_i2s_driver_(audio::AudioStreamInfo &audio_strea
     slot_mask = I2S_STD_SLOT_BOTH;
   }
 
-  i2s_std_slot_config_t std_slot_cfg;
-  if (this->i2s_comm_fmt_ == "std") {
-    std_slot_cfg =
-        I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG((i2s_data_bit_width_t) audio_stream_info.get_bits_per_sample(), slot_mode);
-  } else if (this->i2s_comm_fmt_ == "pcm") {
-    std_slot_cfg =
-        I2S_STD_PCM_SLOT_DEFAULT_CONFIG((i2s_data_bit_width_t) audio_stream_info.get_bits_per_sample(), slot_mode);
-  } else {
-    std_slot_cfg =
-        I2S_STD_MSB_SLOT_DEFAULT_CONFIG((i2s_data_bit_width_t) audio_stream_info.get_bits_per_sample(), slot_mode);
-  }
+  const auto data_bit_width = static_cast<i2s_data_bit_width_t>(audio_stream_info.get_bits_per_sample());
+  this->dma_config_ =
+      get_i2s_dma_config(this->hires_audio_, audio_stream_info.get_sample_rate(), data_bit_width, slot_mode);
+
+  auto init_tx_channel = [&](i2s_clock_src_t clk_src) -> esp_err_t {
+    i2s_chan_config_t chan_cfg = {
+        .id = this->parent_->get_port(),
+        .role = this->i2s_role_,
+        .dma_desc_num = this->dma_config_.dma_desc_num,
+        .dma_frame_num = this->dma_config_.dma_frame_num,
+        .auto_clear = true,
+        .intr_priority = 3,
+    };
+    /* Allocate a new TX channel and get the handle of this channel */
+    esp_err_t err = i2s_new_channel(&chan_cfg, &this->tx_handle_, NULL);
+    if (err != ESP_OK) {
+      ESP_LOGE(TAG, "Failed to allocate new I2S channel");
+      return err;
+    }
+
+    i2s_std_gpio_config_t pin_config = this->parent_->get_pin_config();
+
+    i2s_std_clk_config_t clk_cfg = {
+        .sample_rate_hz = audio_stream_info.get_sample_rate(),
+        .clk_src = clk_src,
+        .mclk_multiple = this->mclk_multiple_,
+    };
+
+    i2s_std_slot_config_t std_slot_cfg;
+    if (this->i2s_comm_fmt_ == "std") {
+      std_slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(data_bit_width, slot_mode);
+    } else if (this->i2s_comm_fmt_ == "pcm") {
+      std_slot_cfg = I2S_STD_PCM_SLOT_DEFAULT_CONFIG(data_bit_width, slot_mode);
+    } else {
+      std_slot_cfg = I2S_STD_MSB_SLOT_DEFAULT_CONFIG(data_bit_width, slot_mode);
+    }
 #ifdef USE_ESP32_VARIANT_ESP32
-  // There seems to be a bug on the ESP32 (non-variant) platform where setting the slot bit width higher then the bits
-  // per sample causes the audio to play too fast. Setting the ws_width to the configured slot bit width seems to
-  // make it play at the correct speed while sending more bits per slot.
-  if (this->slot_bit_width_ != I2S_SLOT_BIT_WIDTH_AUTO) {
-    uint32_t configured_bit_width = static_cast<uint32_t>(this->slot_bit_width_);
-    std_slot_cfg.ws_width = configured_bit_width;
-    if (configured_bit_width > 16) {
-      std_slot_cfg.msb_right = false;
+    // There seems to be a bug on the ESP32 (non-variant) platform where setting the slot bit width higher then the
+    // bits per sample causes the audio to play too fast. Setting the ws_width to the configured slot bit width seems
+    // to make it play at the correct speed while sending more bits per slot.
+    if (this->slot_bit_width_ != I2S_SLOT_BIT_WIDTH_AUTO) {
+      uint32_t configured_bit_width = static_cast<uint32_t>(this->slot_bit_width_);
+      std_slot_cfg.ws_width = configured_bit_width;
+      if (configured_bit_width > 16) {
+        std_slot_cfg.msb_right = false;
+      }
+    }
+#else
+    std_slot_cfg.slot_bit_width = this->slot_bit_width_;
+#endif
+    std_slot_cfg.slot_mask = slot_mask;
+
+    pin_config.dout = this->dout_pin_;
+
+    i2s_std_config_t std_cfg = {
+        .clk_cfg = clk_cfg,
+        .slot_cfg = std_slot_cfg,
+        .gpio_cfg = pin_config,
+    };
+    /* Initialize the channel */
+    err = i2s_channel_init_std_mode(this->tx_handle_, &std_cfg);
+
+    if (err != ESP_OK) {
+      if (this->hires_audio_) {
+        ESP_LOGW(TAG, "Failed to initialize channel using %s: %s", i2s_clock_source_to_string(clk_src),
+                 esp_err_to_name(err));
+      } else {
+        ESP_LOGE(TAG, "Failed to initialize channel");
+      }
+      i2s_del_channel(this->tx_handle_);
+      this->tx_handle_ = nullptr;
+      return err;
+    }
+
+    return ESP_OK;
+  };
+
+  const i2s_clock_src_t preferred_clk_src = get_i2s_clock_source(
+      this->hires_audio_, this->use_apll_, audio_stream_info.get_sample_rate(), this->mclk_multiple_);
+  i2s_clock_src_t clk_src = preferred_clk_src;
+
+  esp_err_t err = init_tx_channel(clk_src);
+#if SOC_I2S_SUPPORTS_APLL
+  if (err != ESP_OK && this->hires_audio_ && i2s_apll_supported()) {
+    const i2s_clock_src_t fallback_clk_src = clk_src == I2S_CLK_SRC_APLL ? I2S_CLK_SRC_DEFAULT : I2S_CLK_SRC_APLL;
+    if (fallback_clk_src != clk_src) {
+      if (fallback_clk_src == I2S_CLK_SRC_APLL) {
+        ESP_LOGW(TAG, "Default I2S clock source could not satisfy this stream, retrying with APLL");
+      } else {
+        ESP_LOGW(TAG, "APLL unavailable or incompatible, retrying with the default I2S clock source");
+      }
+      clk_src = fallback_clk_src;
+      err = init_tx_channel(clk_src);
     }
   }
-#else
-  std_slot_cfg.slot_bit_width = this->slot_bit_width_;
 #endif
-  std_slot_cfg.slot_mask = slot_mask;
-
-  pin_config.dout = this->dout_pin_;
-
-  i2s_std_config_t std_cfg = {
-      .clk_cfg = clk_cfg,
-      .slot_cfg = std_slot_cfg,
-      .gpio_cfg = pin_config,
-  };
-  /* Initialize the channel */
-  err = i2s_channel_init_std_mode(this->tx_handle_, &std_cfg);
-
   if (err != ESP_OK) {
-    ESP_LOGE(TAG, "Failed to initialize channel");
-    i2s_del_channel(this->tx_handle_);
-    this->tx_handle_ = nullptr;
     this->parent_->unlock();
     return err;
   }
+
+  const size_t i2s_event_queue_count =
+      this->hires_audio_ ? (this->dma_config_.dma_desc_num + 1) : LEGACY_I2S_EVENT_QUEUE_COUNT;
+  if (this->hires_audio_ && this->i2s_event_queue_ != nullptr &&
+      this->i2s_event_queue_count_ != i2s_event_queue_count) {
+    vQueueDelete(this->i2s_event_queue_);
+    this->i2s_event_queue_ = nullptr;
+    this->i2s_event_queue_count_ = 0;
+  }
   if (this->i2s_event_queue_ == nullptr) {
-    this->i2s_event_queue_ = xQueueCreate(I2S_EVENT_QUEUE_COUNT, sizeof(int64_t));
+    this->i2s_event_queue_ = xQueueCreate(i2s_event_queue_count, sizeof(int64_t));
+    if (this->i2s_event_queue_ == nullptr) {
+      ESP_LOGE(TAG, "Failed to allocate I2S event queue");
+      i2s_del_channel(this->tx_handle_);
+      this->tx_handle_ = nullptr;
+      this->parent_->unlock();
+      return ESP_ERR_NO_MEM;
+    }
+    this->i2s_event_queue_count_ = i2s_event_queue_count;
+  } else {
+    xQueueReset(this->i2s_event_queue_);
   }
 
   i2s_channel_enable(this->tx_handle_);
+
+  if (this->hires_audio_) {
+    ESP_LOGD(TAG,
+             "Starting I2S TX: %" PRIu32 " Hz, %u-bit, %u channel(s), clk_src=%s, mclk=%" PRIu32 " Hz, dma=%" PRIu32
+             "x%" PRIu32 " frames (%u bytes each)",
+             audio_stream_info.get_sample_rate(), audio_stream_info.get_bits_per_sample(),
+             audio_stream_info.get_channels(), i2s_clock_source_to_string(clk_src),
+             get_i2s_mclk_hz(audio_stream_info.get_sample_rate(), this->mclk_multiple_), this->dma_config_.dma_desc_num,
+             this->dma_config_.dma_frame_num, static_cast<unsigned>(this->dma_config_.dma_buffer_size));
+  }
 
   return err;
 }
