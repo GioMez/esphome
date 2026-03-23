@@ -75,6 +75,12 @@ def sample_bytes_from_bits(bits_per_sample: int) -> int:
     return (int(bits_per_sample) + 7) // 8
 
 
+def _normalize_optional_int_limit(value):
+    if value is cv.UNDEFINED or value is None:
+        return value
+    return cv.int_(value)
+
+
 def set_stream_limits(
     min_bits_per_sample: int = cv.UNDEFINED,
     max_bits_per_sample: int = cv.UNDEFINED,
@@ -91,17 +97,25 @@ def set_stream_limits(
 
     def set_limits_in_config(config):
         if min_bits_per_sample is not cv.UNDEFINED:
-            config[CONF_MIN_BITS_PER_SAMPLE] = min_bits_per_sample
+            config[CONF_MIN_BITS_PER_SAMPLE] = _normalize_optional_int_limit(
+                min_bits_per_sample
+            )
         if max_bits_per_sample is not cv.UNDEFINED:
-            config[CONF_MAX_BITS_PER_SAMPLE] = max_bits_per_sample
+            config[CONF_MAX_BITS_PER_SAMPLE] = _normalize_optional_int_limit(
+                max_bits_per_sample
+            )
         if min_channels is not cv.UNDEFINED:
-            config[CONF_MIN_CHANNELS] = min_channels
+            config[CONF_MIN_CHANNELS] = _normalize_optional_int_limit(min_channels)
         if max_channels is not cv.UNDEFINED:
-            config[CONF_MAX_CHANNELS] = max_channels
+            config[CONF_MAX_CHANNELS] = _normalize_optional_int_limit(max_channels)
         if min_sample_rate is not cv.UNDEFINED:
-            config[CONF_MIN_SAMPLE_RATE] = min_sample_rate
+            config[CONF_MIN_SAMPLE_RATE] = _normalize_optional_int_limit(
+                min_sample_rate
+            )
         if max_sample_rate is not cv.UNDEFINED:
-            config[CONF_MAX_SAMPLE_RATE] = max_sample_rate
+            config[CONF_MAX_SAMPLE_RATE] = _normalize_optional_int_limit(
+                max_sample_rate
+            )
 
     return set_limits_in_config
 
@@ -139,8 +153,12 @@ def final_validate_audio_schema(
         if bits_per_sample is not cv.UNDEFINED:
             try:
                 cv.int_range(
-                    min=audio_config.get(CONF_MIN_BITS_PER_SAMPLE),
-                    max=audio_config.get(CONF_MAX_BITS_PER_SAMPLE),
+                    min=_normalize_optional_int_limit(
+                        audio_config.get(CONF_MIN_BITS_PER_SAMPLE)
+                    ),
+                    max=_normalize_optional_int_limit(
+                        audio_config.get(CONF_MAX_BITS_PER_SAMPLE)
+                    ),
                 )(bits_per_sample)
             except cv.Invalid as exc:
                 if audio_device_issue:
@@ -152,8 +170,12 @@ def final_validate_audio_schema(
         if channels is not cv.UNDEFINED:
             try:
                 cv.int_range(
-                    min=audio_config.get(CONF_MIN_CHANNELS),
-                    max=audio_config.get(CONF_MAX_CHANNELS),
+                    min=_normalize_optional_int_limit(
+                        audio_config.get(CONF_MIN_CHANNELS)
+                    ),
+                    max=_normalize_optional_int_limit(
+                        audio_config.get(CONF_MAX_CHANNELS)
+                    ),
                 )(channels)
             except cv.Invalid as exc:
                 if audio_device_issue:
@@ -165,8 +187,12 @@ def final_validate_audio_schema(
         if sample_rate is not cv.UNDEFINED:
             try:
                 cv.int_range(
-                    min=audio_config.get(CONF_MIN_SAMPLE_RATE),
-                    max=audio_config.get(CONF_MAX_SAMPLE_RATE),
+                    min=_normalize_optional_int_limit(
+                        audio_config.get(CONF_MIN_SAMPLE_RATE)
+                    ),
+                    max=_normalize_optional_int_limit(
+                        audio_config.get(CONF_MAX_SAMPLE_RATE)
+                    ),
                 )(sample_rate)
             except cv.Invalid as exc:
                 if audio_device_issue:
@@ -181,7 +207,10 @@ def final_validate_audio_schema(
                     # Channels are 0-indexed
                     cv.int_range(
                         min=0,
-                        max=audio_config.get(CONF_MAX_CHANNELS) - 1,
+                        max=_normalize_optional_int_limit(
+                            audio_config.get(CONF_MAX_CHANNELS)
+                        )
+                        - 1,
                     )(channel)
                 except cv.Invalid as exc:
                     if audio_device_issue:
