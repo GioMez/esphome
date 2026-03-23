@@ -9,8 +9,8 @@ from esphome.components.const import (
 )
 import esphome.config_validation as cv
 from esphome.const import (
-    CONF_DELAY,
     CONF_BITS_PER_SAMPLE,
+    CONF_DELAY,
     CONF_FORMAT,
     CONF_ID,
     CONF_NUM_CHANNELS,
@@ -76,6 +76,10 @@ FORMAT_MAPPING = {
 
 # Returns a media_player.MediaPlayerSupportedFormat struct with the configured
 # format, sample rate, number of channels, purpose, and bytes per sample
+def _sample_bytes_from_bits(bits_per_sample):
+    return (int(bits_per_sample) + 7) // 8
+
+
 def _get_supported_format_struct(pipeline: ConfigType, purpose: MockObj):
     args = [
         media_player.MediaPlayerSupportedFormat,
@@ -90,7 +94,9 @@ def _get_supported_format_struct(pipeline: ConfigType, purpose: MockObj):
     # Omit sample_bytes for MP3: ffmpeg transcoding in Home Assistant fails
     # if the number of bytes per sample is specified for MP3.
     if pipeline[CONF_FORMAT] != "MP3":
-        args.append(("sample_bytes", (pipeline[CONF_BITS_PER_SAMPLE] + 7) // 8))
+        args.append(
+            ("sample_bytes", _sample_bytes_from_bits(pipeline[CONF_BITS_PER_SAMPLE]))
+        )
 
     return cg.StructInitializer(*args)
 

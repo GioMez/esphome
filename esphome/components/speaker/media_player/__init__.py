@@ -109,6 +109,10 @@ def _download_web_file(value):
 
 # Returns a media_player.MediaPlayerSupportedFormat struct with the configured
 # format, sample rate, number of channels, purpose, and bytes per sample
+def _sample_bytes_from_bits(bits_per_sample):
+    return (int(bits_per_sample) + 7) // 8
+
+
 def _get_supported_format_struct(pipeline, type):
     args = [
         media_player.MediaPlayerSupportedFormat,
@@ -141,7 +145,9 @@ def _get_supported_format_struct(pipeline, type):
             )
         )
     if pipeline[CONF_FORMAT] != "MP3":
-        args.append(("sample_bytes", (pipeline[CONF_BITS_PER_SAMPLE] + 7) // 8))
+        args.append(
+            ("sample_bytes", _sample_bytes_from_bits(pipeline[CONF_BITS_PER_SAMPLE]))
+        )
 
     return cg.StructInitializer(*args)
 
