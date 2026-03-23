@@ -16,8 +16,7 @@
 namespace esphome {
 namespace i2s_audio {
 
-static const size_t LEGACY_DMA_BUFFERS_COUNT = I2S_LEGACY_DMA_BUFFERS_COUNT;
-static const size_t LEGACY_I2S_EVENT_QUEUE_COUNT = LEGACY_DMA_BUFFERS_COUNT + 1;
+static constexpr size_t LEGACY_I2S_EVENT_QUEUE_COUNT = I2S_LEGACY_DMA_BUFFERS_COUNT + 1;
 
 static const size_t TASK_STACK_SIZE = 4096;
 static const ssize_t TASK_PRIORITY = 19;
@@ -563,8 +562,7 @@ esp_err_t I2SAudioSpeaker::start_i2s_driver_(audio::AudioStreamInfo &audio_strea
     return ESP_OK;
   };
 
-  const i2s_clock_src_t preferred_clk_src = get_i2s_clock_source(
-      this->hires_audio_, this->use_apll_, audio_stream_info.get_sample_rate(), this->mclk_multiple_);
+  const i2s_clock_src_t preferred_clk_src = get_i2s_clock_source(this->use_apll_);
   i2s_clock_src_t clk_src = preferred_clk_src;
 
   esp_err_t err = init_tx_channel(clk_src);
@@ -611,15 +609,13 @@ esp_err_t I2SAudioSpeaker::start_i2s_driver_(audio::AudioStreamInfo &audio_strea
 
   i2s_channel_enable(this->tx_handle_);
 
-  if (this->hires_audio_) {
-    ESP_LOGD(TAG,
-             "Starting I2S TX: %" PRIu32 " Hz, %u-bit, %u channel(s), clk_src=%s, mclk=%" PRIu32 " Hz, dma=%" PRIu32
-             "x%" PRIu32 " frames (%u bytes each)",
-             audio_stream_info.get_sample_rate(), audio_stream_info.get_bits_per_sample(),
-             audio_stream_info.get_channels(), i2s_clock_source_to_string(clk_src),
-             get_i2s_mclk_hz(audio_stream_info.get_sample_rate(), this->mclk_multiple_), this->dma_config_.dma_desc_num,
-             this->dma_config_.dma_frame_num, static_cast<unsigned>(this->dma_config_.dma_buffer_size));
-  }
+  ESP_LOGV(TAG,
+           "Starting I2S TX: %" PRIu32 " Hz, %u-bit, %u channel(s), clk_src=%s, mclk=%" PRIu32 " Hz, dma=%" PRIu32
+           "x%" PRIu32 " frames (%u bytes each)",
+           audio_stream_info.get_sample_rate(), audio_stream_info.get_bits_per_sample(),
+           audio_stream_info.get_channels(), i2s_clock_source_to_string(clk_src),
+           get_i2s_mclk_hz(audio_stream_info.get_sample_rate(), this->mclk_multiple_), this->dma_config_.dma_desc_num,
+           this->dma_config_.dma_frame_num, static_cast<unsigned>(this->dma_config_.dma_buffer_size));
 
   return err;
 }

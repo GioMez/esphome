@@ -15,9 +15,11 @@ from esphome.const import (
 )
 
 from .. import (
+    CONF_HIRES_AUDIO,
     CONF_I2S_DOUT_PIN,
     CONF_I2S_MODE,
     CONF_LEFT,
+    CONF_MCLK_MULTIPLE,
     CONF_MONO,
     CONF_PRIMARY,
     CONF_RIGHT,
@@ -62,6 +64,9 @@ I2C_COMM_FMT_OPTIONS = {
 }
 
 INTERNAL_DAC_VARIANTS = [esp32.VARIANT_ESP32]
+LEGACY_MAX_SAMPLE_RATE = 48000
+HIRES_MAX_SAMPLE_RATE = 384000
+HIRES_MAX_MCLK_HZ = 50_000_000
 
 
 def _set_num_channels_from_config(config):
@@ -82,6 +87,11 @@ def _set_stream_limits(config):
             min_channels=1,
             max_channels=2,
             min_sample_rate=16000,
+            max_sample_rate=(
+                HIRES_MAX_SAMPLE_RATE
+                if config[CONF_HIRES_AUDIO]
+                else LEGACY_MAX_SAMPLE_RATE
+            ),
         )(config)
     else:
         # Secondary mode has unmodifiable max bits per sample and min/max sample rates
@@ -92,7 +102,33 @@ def _set_stream_limits(config):
             max_channels=2,
             min_sample_rate=config.get(CONF_SAMPLE_RATE),
             max_sample_rate=config.get(CONF_SAMPLE_RATE),
+        )(config)
+
+    return config
+
+
+def _validate_hires_audio(config):
+    sample_rate = config[CONF_SAMPLE_RATE]
+
+    if not config[CONF_HIRES_AUDIO]:
+        if sample_rate > LEGACY_MAX_SAMPLE_RATE:
+            raise cv.Invalid(
+                f"{CONF_SAMPLE_RATE} above {LEGACY_MAX_SAMPLE_RATE} Hz requires {CONF_HIRES_AUDIO}: true"
+            )
+        return config
+
+    if sample_rate > HIRES_MAX_SAMPLE_RATE:
+        raise cv.Invalid(
+            f"{CONF_SAMPLE_RATE} must not exceed {HIRES_MAX_SAMPLE_RATE} Hz when {CONF_HIRES_AUDIO}: true"
         )
+
+    if config[CONF_I2S_MODE] == CONF_PRIMARY:
+        requested_mclk_hz = sample_rate * config[CONF_MCLK_MULTIPLE]
+        if requested_mclk_hz > HIRES_MAX_MCLK_HZ:
+            raise cv.Invalid(
+                f"The requested MCLK of {requested_mclk_hz} Hz is above the conservative hi-res limit of "
+                f"{HIRES_MAX_MCLK_HZ} Hz; reduce {CONF_SAMPLE_RATE} or {CONF_MCLK_MULTIPLE}"
+            )
 
     return config
 
@@ -157,6 +193,7 @@ CONFIG_SCHEMA = cv.All(
         key=CONF_DAC_TYPE,
     ),
     _validate_esp32_variant,
+    _validate_hires_audio,
     _set_num_channels_from_config,
     _set_stream_limits,
     validate_mclk_divisible_by_3,

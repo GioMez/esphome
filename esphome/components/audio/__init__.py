@@ -71,6 +71,10 @@ AUDIO_COMPONENT_SCHEMA = cv.Schema(
 )
 
 
+def sample_bytes_from_bits(bits_per_sample: int) -> int:
+    return (int(bits_per_sample) + 7) // 8
+
+
 def set_stream_limits(
     min_bits_per_sample: int = cv.UNDEFINED,
     max_bits_per_sample: int = cv.UNDEFINED,

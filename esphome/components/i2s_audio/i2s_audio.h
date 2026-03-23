@@ -12,7 +12,6 @@
 #include <esp_idf_version.h>
 #include <driver/i2s_std.h>
 #include <hal/dma_types.h>
-#include <hal/i2s_ll.h>
 
 namespace esphome {
 namespace i2s_audio {
@@ -50,7 +49,8 @@ inline uint32_t get_i2s_dma_active_slot_count(i2s_slot_mode_t slot_mode) {
 
 inline size_t get_i2s_dma_bytes_per_sample(i2s_data_bit_width_t data_bit_width) {
 #ifdef USE_ESP32_VARIANT_ESP32
-  // Original ESP32 transfers samples in 16-bit units, so 24-bit audio still occupies 4 bytes.
+  // Original ESP32 transfers samples in 16-bit units, so 8/16-bit audio still occupies 2 bytes
+  // per sample in DMA memory and 24/32-bit audio occupies 4 bytes.
   return ((static_cast<uint32_t>(data_bit_width) + 15U) / 16U) * 2U;
 #else
   return (static_cast<uint32_t>(data_bit_width) + 7U) / 8U;
@@ -129,37 +129,6 @@ inline uint32_t get_i2s_mclk_hz(uint32_t sample_rate, i2s_mclk_multiple_t mclk_m
   return sample_rate * static_cast<uint32_t>(mclk_multiple);
 }
 
-// Mirrors the IDF clock feasibility check closely enough to decide when the default source is
-// clearly too slow and we should jump straight to APLL.
-inline bool i2s_default_clock_can_support_mclk(uint32_t sample_rate, i2s_mclk_multiple_t mclk_multiple) {
-#ifdef I2S_LL_DEFAULT_CLK_FREQ
-  return static_cast<uint64_t>(I2S_LL_DEFAULT_CLK_FREQ) >
-         (static_cast<uint64_t>(get_i2s_mclk_hz(sample_rate, mclk_multiple)) * 2ULL);
-#else
-  (void) sample_rate;
-  (void) mclk_multiple;
-  return true;
-#endif
-}
-
-// APLL stays opt-in unless the SoC's default source cannot satisfy the requested MCLK. That keeps
-// common cases simple while still rescuing high-rate modes such as early ESP32-P4 revisions on XTAL.
-inline bool should_use_i2s_apll(bool hires_audio, bool configured_use_apll, uint32_t sample_rate,
-                                i2s_mclk_multiple_t mclk_multiple) {
-#if SOC_I2S_SUPPORTS_APLL
-  if (!hires_audio) {
-    return configured_use_apll;
-  }
-  return configured_use_apll || !i2s_default_clock_can_support_mclk(sample_rate, mclk_multiple);
-#else
-  (void) hires_audio;
-  (void) configured_use_apll;
-  (void) sample_rate;
-  (void) mclk_multiple;
-  return false;
-#endif
-}
-
 inline bool i2s_apll_supported() {
 #if SOC_I2S_SUPPORTS_APLL
   return true;
@@ -168,19 +137,15 @@ inline bool i2s_apll_supported() {
 #endif
 }
 
-// Keep source selection centralized so every I2S user applies the same policy.
-inline i2s_clock_src_t get_i2s_clock_source(bool hires_audio, bool configured_use_apll, uint32_t sample_rate,
-                                            i2s_mclk_multiple_t mclk_multiple) {
+// Keep source selection centralized so every I2S user starts from the same configured preference.
+inline i2s_clock_src_t get_i2s_clock_source(bool configured_use_apll) {
   i2s_clock_src_t clk_src = I2S_CLK_SRC_DEFAULT;
 #if SOC_I2S_SUPPORTS_APLL
-  if (should_use_i2s_apll(hires_audio, configured_use_apll, sample_rate, mclk_multiple)) {
+  if (configured_use_apll) {
     clk_src = I2S_CLK_SRC_APLL;
   }
 #else
-  (void) hires_audio;
   (void) configured_use_apll;
-  (void) sample_rate;
-  (void) mclk_multiple;
 #endif
   return clk_src;
 }
@@ -209,7 +174,7 @@ class I2SAudioBase : public Parented<I2SAudioComponent> {
   void set_std_slot_mask(i2s_std_slot_mask_t std_slot_mask) { this->std_slot_mask_ = std_slot_mask; }
   void set_slot_bit_width(i2s_slot_bit_width_t slot_bit_width) { this->slot_bit_width_ = slot_bit_width; }
   void set_sample_rate(uint32_t sample_rate) { this->sample_rate_ = sample_rate; }
-  void set_use_apll(uint32_t use_apll) { this->use_apll_ = use_apll; }
+  void set_use_apll(bool use_apll) { this->use_apll_ = use_apll; }
   void set_hires_audio(bool hires_audio) { this->hires_audio_ = hires_audio; }
   void set_mclk_multiple(i2s_mclk_multiple_t mclk_multiple) { this->mclk_multiple_ = mclk_multiple; }
 

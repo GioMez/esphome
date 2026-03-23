@@ -125,6 +125,11 @@ struct AudioFile {
   AudioFileType file_type;
 };
 
+/// @brief Returns true when the bit depth is byte-aligned PCM that ESPHome can pass through unchanged.
+inline bool supports_pcm_bit_depth(uint8_t bits_per_sample) {
+  return (bits_per_sample >= 8) && (bits_per_sample <= 32) && ((bits_per_sample % 8) == 0);
+}
+
 /// @brief Helper function to convert file type to a const char string
 /// @param file_type
 /// @return const char pointer to the readable file type

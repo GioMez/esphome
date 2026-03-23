@@ -24,10 +24,6 @@ static const uint32_t INFO_ERROR_QUEUE_COUNT = 5;
 
 static const char *const TAG = "speaker_media_player.pipeline";
 
-static bool supports_pcm_bit_depth(uint8_t bits_per_sample) {
-  return (bits_per_sample >= 8) && (bits_per_sample <= 32) && ((bits_per_sample % 8) == 0);
-}
-
 enum EventGroupBits : uint32_t {
   // MESSAGE_* bits are only set by their respective tasks
 
@@ -464,7 +460,7 @@ void AudioPipeline::decode_task(void *params) {
           // Send the stream information to the pipeline
           event.audio_stream_info = this_pipeline->current_audio_stream_info_;
 
-          if (!supports_pcm_bit_depth(this_pipeline->current_audio_stream_info_.get_bits_per_sample())) {
+          if (!audio::supports_pcm_bit_depth(this_pipeline->current_audio_stream_info_.get_bits_per_sample())) {
             // Error state, incompatible bits per sample
             event.decoding_err = DecodingError::INCOMPATIBLE_BITS_PER_SAMPLE;
             xEventGroupSetBits(this_pipeline->event_group_,
