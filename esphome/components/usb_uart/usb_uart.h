@@ -192,7 +192,7 @@ class USBUartComponent : public usb_host::USBClient {
   void start_output(USBUartChannel *channel);
 
   // Lock-free data transfer from USB task to main loop
-  static constexpr int USB_DATA_QUEUE_SIZE = 64;
+  static constexpr int USB_DATA_QUEUE_SIZE = 128;
   LockFreeQueue<UsbDataChunk, USB_DATA_QUEUE_SIZE> usb_data_queue_;
   // Pool sized to queue capacity (SIZE-1) — see USBUartChannel::output_pool_ comment.
   EventPool<UsbDataChunk, USB_DATA_QUEUE_SIZE - 1> chunk_pool_;
